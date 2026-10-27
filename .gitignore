@@ -11,3 +11,5 @@ htmlcov/
 venv/
 .env
 .DS_Store
+
+.mypy_cache/

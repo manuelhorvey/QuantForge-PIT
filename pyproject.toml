@@ -6,9 +6,9 @@ name = "quantforge-pit"
 version = "0.1.0"
 description = "Point-in-time, leakage-aware quantitative research and event-driven backtest scaffold"
 requires-python = ">=3.11"
-dependencies = ["numpy>=1.26", "pandas>=2.1", "scipy>=1.11", "scikit-learn>=1.4", "pydantic>=2.5"]
+dependencies = ["numpy>=1.26", "pandas>=2.1", "pyarrow>=14", "scipy>=1.11", "scikit-learn>=1.4", "pydantic>=2.5"]
 [project.optional-dependencies]
-test = ["pytest>=8", "pytest-cov>=5", "ruff>=0.5"]
+test = ["pytest>=8", "pytest-cov>=5", "ruff>=0.5", "mypy>=1.8"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
