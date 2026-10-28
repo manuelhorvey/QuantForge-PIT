@@ -1,3 +1,10 @@
+from .ledger import LedgerIntegrityError, TrialLedger, TrialRecord
 from .risk import RiskLimits, pretrade_check
-from .ledger import TrialLedger
-__all__ = ["RiskLimits", "pretrade_check", "TrialLedger"]
+
+__all__ = [
+    "LedgerIntegrityError",
+    "RiskLimits",
+    "TrialLedger",
+    "TrialRecord",
+    "pretrade_check",
+]

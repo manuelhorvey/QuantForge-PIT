@@ -6,6 +6,8 @@ Module 1 (the data layer) is implemented as a provider-neutral, offline-testable
 
 Module 2 (the research dataset layer) adds declarative PIT feature specs, forward-outcome labels with explicit availability, deterministic dataset assembly with canonical hashes, and a forward-only purged/embargoed time split. Its label convention is intentionally **not** claimed to match the existing backtest engine.
 
+Module 3 (experiment evaluation and integrity) binds a dataset to a preregistered experiment spec, generates purge-aware walk-forward folds, validates exact out-of-sample prediction coverage, computes descriptive fold and pooled metrics, and records registration and terminal outcomes in a hash-chained trial ledger. It does not fit models, select strategies, or establish a trading edge.
+
 ## Design principles
 
 - **No “zero-error” promise:** financial systems cannot guarantee zero errors. The goal is explicit contracts, tests, immutable evidence, monitoring, and safe failure.
@@ -24,6 +26,7 @@ pip install -e '.[test]'
 pytest
 python examples/demo.py
 PYTHONPATH=. python examples/research_pipeline.py
+PYTHONPATH=. python examples/experiment_pipeline.py
 ```
 
 ## Package map
@@ -32,11 +35,12 @@ PYTHONPATH=. python examples/research_pipeline.py
 - `quantforge/features/`: feature specs, PIT feature computation, fractional differentiation, and basic factors.
 - `quantforge/labels.py`: forward-return, excess-return, and adjusted-price labels.
 - `quantforge/dataset.py`: feature/label dataset assembly and canonical provenance hashing.
+- `quantforge/experiments/`: deterministic experiment specifications, purge-aware walk-forward folds, exact-coverage OOS evaluation, and descriptive metrics.
 - `quantforge/models/`: sklearn pipeline helper, legacy purged split, and forward-only time split.
 - `quantforge/backtest/`: event-loop reference simulator and cost model.
 - `quantforge/optimization/`: parameter grid, DSR diagnostic, CPCV/PBO, walk-forward.
 - `quantforge/portfolio/`: constrained signal-to-target sizing.
-- `quantforge/governance/`: fail-closed pre-trade risk checks and trial ledger.
+- `quantforge/governance/`: fail-closed pre-trade risk checks and a hash-chained trial ledger.
 - `quantforge/execution/`: broker protocol and dry-run adapter.
 - `tests/`: contracts and alignment regressions.
 - `docs/ARCHITECTURE.md`: lifecycle, limitations, and deployment gates.
@@ -100,12 +104,37 @@ Operational notes:
 
 See [`docs/MILESTONE_2.md`](docs/MILESTONE_2.md) for the full contract and limitations.
 
+## Module 3 public surface
+
+```python
+from quantforge.experiments import (
+    ExperimentError, ExperimentIntegrityError, PredictionCoverageError,
+    WalkForwardSpec, ExperimentSpec, PurgedFold, FoldPlan, ExperimentPlan,
+    FoldResult, ExperimentResult, plan_folds, plan_experiment,
+    evaluate_fold, evaluate_experiment,
+)
+from quantforge.governance import LedgerIntegrityError, TrialLedger, TrialRecord
+```
+
+Operational notes:
+
+- `ExperimentSpec` binds the dataset ID, label, feature order, fold geometry, estimator name, parameters, code version, metrics, and selection metric into a deterministic `experiment_id`. Changing any bound input changes the ID. Planning revalidates the dataset and all dataset/spec bindings.
+- `WalkForwardSpec` requires timezone-aware UTC boundaries, a positive step at least as long as the test window, a non-negative embargo, and positive row minimums. Candidate windows have fixed duration, do not overlap, and stop deterministically at `max_folds` or the available data.
+- Fold analysis excludes dataset rows without an `ok` finite label and reports status counts. Training rows are selected only from before the test start with label intervals and availability purged at the boundary; embargo equality is conservative. Post-test rows are never trained on. Returned indices are positional dataset indices.
+- Predictions must cover exactly one row per fold test key, in any row order. Duplicate, missing, and extra keys fail; prediction values must be finite real numbers, not booleans. Labels are read from the validated dataset, not from caller-supplied prediction columns.
+- Supported descriptive metrics are `mae`, `rmse`, `mean_error`, `pearson`, and `directional_accuracy`; only `mae`, `rmse`, and `directional_accuracy` are selectable as the primary metric. Undefined Pearson or directional accuracy is represented as `None`. Pooled metrics use all pooled OOS rows, not an average of fold metrics. Metric results are descriptive, not evidence of a profitable edge.
+- The trial ledger records one optional registration event (`PREREGISTERED` or `UNVALIDATED`) followed by at most one terminal event (`COMPLETED`, `FAILED`, `ABANDONED`, or `EXCLUDED`). Trial identity fields cannot change between events. A failed evaluation must be recorded as a failure and cannot later be marked `COMPLETED`; terminal-only one-shot use is accepted and reported as unregistered.
+- Ledger entries are canonical JSONL linked by SHA-256; verification detects modified payloads, previous/entry hash changes, reordered records, and deleted middle records. This is tamper-evident, not tamper-proof: whole-file replacement, tail truncation, or a writer that rewrites the entire file require an externally published head hash or WORM storage to detect. Concurrent writers are unsupported.
+- `code_version` is caller-supplied and hashed, not attested. Preregistration is procedural: the ledger cannot prove the researcher did not inspect data elsewhere, and fold indices do not prevent deliberate training on test rows or label leakage.
+
+See [`docs/MILESTONE_3.md`](docs/MILESTONE_3.md) for the full workflow, lifecycle, acceptance evidence, and limitations.
+
 ## Scope intentionally not faked
 
 A real FIX/REST integration, tick/order-book replay, licensed historical fundamentals/alternative data, a complete survivorship-aware delisted universe, production exchange calendars, provider-specific corporate-action history, broker reconciliation, portfolio optimizer, RL environment, and live operations cannot be safely fabricated without provider-specific schemas, account constraints, licensing, and acceptance criteria. The included corporate-action ledger, fixture calendars, and universe store are reference components; they are only as complete as the data and coverage declarations supplied by the operator.
 
 ## Implemented versus interface-only
 
-Implemented: canonical OHLCV validation; PIT normalization, as-of joins, rolling features, snapshots, resampling, and staleness flags; transactional SQLite and staged/rollback-protected Parquet storage with revisions and conflict detection; SHA-256 raw archival; local Parquet/CSV/SQLite and injectable HTTP ingestion; split/dividend/total-return adjustment with declared coverage; fixture trading calendars/session alignment; versioned instrument, membership, lifecycle, and symbol-mapping queries; declarative PIT feature specifications and computation; forward-return and excess-return labels with explicit availability; deterministic feature/label dataset assembly and canonical hashing; forward-only purged/embargoed time splitting; causal fractional differentiation; trailing factors; a baseline sklearn regression pipeline; an unsupervised regime-clustering helper; legacy basic purged split geometry; walk-forward windows; CPCV split geometry and a PBO diagnostic over paired IS/OOS matrices; approximate DSR; deterministic parameter enumeration; a single-asset next-bar simulator; approximate square-root impact costs; basic target weights; fail-closed risk checks; an append-only JSONL trial ledger; and a dry-run broker.
+Implemented: canonical OHLCV validation; PIT normalization, as-of joins, rolling features, snapshots, resampling, and staleness flags; transactional SQLite and staged/rollback-protected Parquet storage with revisions and conflict detection; SHA-256 raw archival; local Parquet/CSV/SQLite and injectable HTTP ingestion; split/dividend/total-return adjustment with declared coverage; fixture trading calendars/session alignment; versioned instrument, membership, lifecycle, and symbol-mapping queries; declarative PIT feature specifications and computation; forward-return and excess-return labels with explicit availability; deterministic feature/label dataset assembly and canonical hashing; forward-only purged/embargoed time splitting; deterministic experiment specifications, purge-aware walk-forward folds, and exact-coverage out-of-sample evaluation; causal fractional differentiation; trailing factors; a baseline sklearn regression pipeline; an unsupervised regime-clustering helper; legacy basic purged split geometry; walk-forward windows; CPCV split geometry and a PBO diagnostic over paired IS/OOS matrices; approximate DSR; deterministic parameter enumeration; a single-asset next-bar simulator; approximate square-root impact costs; basic target weights; fail-closed risk checks; a hash-chained JSONL trial ledger; and a dry-run broker.
 
 Not implemented as a production feature: licensed PIT data acquisition, a complete survivorship-aware delisted universe, provider-complete corporate actions/calendars, tick/LOB replay, multi-asset portfolio accounting, sector constraints, vendor/broker-specific production connectors, FIX/REST order state machines, margin liquidation, live monitoring, a feature store or dataset persistence layer, backtest/label execution equivalence, RL training/deployment, or an institutionally validated DSR/PBO pipeline. Those require domain-specific contracts, licensed data, and independent review.
